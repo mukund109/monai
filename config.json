@@ -1,0 +1,37 @@
+{
+  "debug":true,
+  "verbose":true,
+  "model_weights":"/vgg19_weights/imagenet-vgg-verydeep-19.mat",
+  "device":"/gpu:0",
+
+  "optimizer":"adam", // adam or lbfgs
+  "learning_rate":1e0,
+  "max_iterations":800,
+
+  "style_images":[],
+  "style_image_weights":[],
+  "style_weight": 1e4, //default=1e4
+  "style_layers":["relu1_1", "relu2_1", "relu3_1", "relu4_1", "relu5_1"],
+  "style_layer_weights":[0.2,0.2,0.2,0.2,0.2],
+
+  "tv_weight":1e-3, //default=1e-3
+
+  "content_image": "random.jpg",
+  "output_scale":1,
+  "content_weight":5e0, //default=5e0
+  //content preprocessing
+  "content_loss_constant":1, //choice[1,2,3]
+  "content_layers":["conv4_2"],
+  "pooling_type":"avg", //['avg','max']
+  "content_layer_weights":[1],
+
+  "original_colors":false,
+  "color_convert_method":"crude",
+  "color_convert_type":"yuv", //['yuv', 'ycrcb', 'luv', 'lab']
+  "color_convert_time":"after", //['after','before']
+
+  "init_image":["content", "random", "style", "custom"], \\others
+  "init_image_path":"yoyo.jpg",
+  "noise_ratio":0.5,
+
+}
