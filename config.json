@@ -1,14 +1,14 @@
 {
   "debug":true,
   "verbose":true,
-  "model_weights":"../vgg_pretrained/imagenet-vgg-verydeep-19.mat",
+  "model_weights":"vgg_pretrained/imagenet-vgg-verydeep-19.mat",
   "device":"/gpu:0",
 
   "optimizer":"adam",
   "learning_rate":1e0,
-  "max_iterations":60,
+  "max_iterations":100,
 
-  "style_images":["images/synthetic_300.jpg"],
+  "style_images":["sample_images/style_50.jpg"],
   "style_image_weights":[1], //adam_or_lbfgs
   "style_weight": 1e4, //default=1e4
   "style_layers":["relu1_1", "relu2_1", "relu3_1", "relu4_1", "relu5_1"],
@@ -16,7 +16,7 @@
 
   "tv_weight":1e-3, //default=1e-3
 
-  "content_image": "images/aurat_100.jpeg",
+  "content_image": "sample_images/aurat_50.jpeg",
   "output_scale":1,
   "content_weight":5e0, //default=5e0
   //content preprocessing

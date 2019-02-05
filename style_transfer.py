@@ -1,4 +1,3 @@
-import tensorflow as tf
 import numpy as np
 from model import build_model
 from utils import get_content_image, get_style_images, get_init_image, get_config, write_image, write_image_output
@@ -8,6 +7,7 @@ import time
 import cv2
 import os
 import json
+import tensorflow as tf
 
 config = get_config()
 
@@ -41,7 +41,9 @@ def style_layer_loss(a, x):
         M = h.value * w.value
         N = d.value
         A = gram_matrix(a, M, N)
+        tf.summary.image(a.name, A[tf.newaxis, :,:,tf.newaxis])
         G = gram_matrix(x, M, N)
+        tf.summary.image('input_gram_matrix', G[tf.newaxis, :, :, tf.newaxis])
         loss = (1./(4 * N**2 * M**2)) * tf.reduce_sum(tf.pow((G - A), 2))
     return loss
 
@@ -107,8 +109,10 @@ def minimize_with_lbfgs(sess, net, optimizer, init_img):
     sess.run(net['input'].assign(init_img))
     optimizer.minimize(sess)
 
-def minimize_with_adam(sess, net, optimizer, init_img, loss, content_img):
+def minimize_with_adam(sess, net, optimizer, init_img, loss, content_img, \
+                                                        writer, summary):
     if config['verbose']: print('\nMINIMIZING LOSS USING: ADAM OPTIMIZER')
+
     train_op = optimizer.minimize(loss)
     init_op = tf.global_variables_initializer()
     sess.run(init_op)
@@ -116,6 +120,9 @@ def minimize_with_adam(sess, net, optimizer, init_img, loss, content_img):
     iterations = 0
     while (iterations < config['max_iterations']):
         sess.run(train_op)
+        if (iterations%20 == 0):
+            recorded_summary = sess.run(summary)
+            writer.add_summary(recorded_summary, iterations)
         if config['verbose'] and (iterations%50 == 0):
             curr_loss = loss.eval()
 
@@ -137,17 +144,19 @@ def stylize(content_img, style_imgs, init_img, frame=None):
     if config['debug']:
         config['device']="/cpu:0"
     with tf.device(config['device']), tf.Session() as sess:
+
         # setup network
         net = build_model(content_img)
 
-        # style loss
-        L_style = sum_style_losses(sess, net, style_imgs)
+        with tf.name_scope('losses'):
+            # style loss
+            L_style = sum_style_losses(sess, net, style_imgs)
 
-        # content loss
-        L_content = sum_content_losses(sess, net, content_img)
+            # content loss
+            L_content = sum_content_losses(sess, net, content_img)
 
-        # denoising loss
-        L_tv = tf.image.total_variation(net['input'])
+            # denoising loss
+            L_tv = tf.reshape(tf.image.total_variation(net['input']), [])
 
         # loss weights
         alpha = config['content_weight']
@@ -159,11 +168,19 @@ def stylize(content_img, style_imgs, init_img, frame=None):
         L_total += beta  * L_style
         L_total += theta * L_tv
 
+        tf_writer = tf.summary.FileWriter('summary', sess.graph)
+        tf.summary.scalar('Content Loss', L_content)
+        tf.summary.scalar('Style Loss', L_style)
+        tf.summary.scalar('Variation Loss', L_tv)
+        tf.summary.scalar('Total Loss', L_total)
+        tf.summary.image('Stylized Image', net['input'])
+        summary_op = tf.summary.merge_all()
         # optimization algorithm
         optimizer = get_optimizer(L_total)
 
         if config['optimizer'] == 'adam':
-            minimize_with_adam(sess, net, optimizer, init_img, L_total, np.copy(content_img))
+            minimize_with_adam(sess, net, optimizer, init_img, L_total, \
+                np.copy(content_img), tf_writer, summary_op)
         elif config['optimizer'] == 'lbfgs':
             minimize_with_lbfgs(sess, net, optimizer, init_img)
 
