@@ -1,3 +1,20 @@
+import json
+import cv2
+import numpy as np
+from collections import OrderedDict
+import os
+
+def get_config():
+    json_str = ''
+    with open('config.json', 'r') as f:
+        for line in f:
+            line = line.split('//')[0] + '\n'
+            json_str += line
+    opt = json.loads(json_str, object_pairs_hook=OrderedDict)
+    return opt
+
+config = get_config()
+
 def read_image(path):
     # bgr image
     img = cv2.imread(path, cv2.IMREAD_COLOR)
@@ -5,6 +22,10 @@ def read_image(path):
     img = img.astype(np.float32)
     img = preprocess(img)
     return img
+
+def maybe_make_directory(dir_path):
+    if not os.path.exists(dir_path):
+        os.makedirs(dir_path)
 
 def check_image(img, path):
     if img is None:
@@ -55,7 +76,7 @@ def normalize(weights):
     else: return [0.] * len(weights)
 
 def get_content_image(content_img):
-    path = os.path.join(config['content_img_dir'], content_img)
+    path = content_img
     # bgr image
     img = cv2.imread(path, cv2.IMREAD_COLOR)
     check_image(img, path)
@@ -80,8 +101,8 @@ def get_content_image(content_img):
 def get_style_images(content_img):
     _, ch, cw, cd = content_img.shape
     style_imgs = []
-    for style_fn in config['style_imgs']:
-        path = os.path.join(config['style_imgs_dir'], style_fn)
+    for style_fn in config['style_images']:
+        path = style_fn
         # bgr image
         img = cv2.imread(path, cv2.IMREAD_COLOR)
         check_image(img, path)
@@ -108,3 +129,24 @@ def get_init_image(init_type, content_img, style_imgs, frame=None, init_img_path
         return preprocess(init_img)
     else:
         raise FileNotFoundError()
+
+def write_image_output(output_img, content_img, style_imgs, init_img):
+    out_dir = config["image_output_dir"]
+    maybe_make_directory(out_dir)
+    img_path = os.path.join(out_dir,  "output.png")
+    content_path = os.path.join(out_dir, 'content.png')
+    init_path = os.path.join(out_dir, 'init.png')
+
+    write_image(img_path, output_img)
+    write_image(content_path, content_img)
+    write_image(init_path, init_img)
+    index = 0
+    for style_img in style_imgs:
+        path = os.path.join(out_dir, 'style_'+str(index)+'.png')
+        write_image(path, style_img)
+        index += 1
+
+    # save the configuration settings
+    out_file = os.path.join(out_dir, 'meta_data.json')
+    with open(out_file, 'w') as f:
+        json.dump(config, f)

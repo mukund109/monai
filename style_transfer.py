@@ -1,7 +1,7 @@
 import tensorflow as tf
 import numpy as np
 from model import build_model
-from utils import get_content_image, get_style_images
+from utils import get_content_image, get_style_images, get_init_image, get_config, write_image, write_image_output
 import struct
 import errno
 import time
@@ -9,7 +9,7 @@ import cv2
 import os
 import json
 
-config = json.load(open('config.json'))
+config = get_config()
 
 def content_layer_loss(p, x):
     """
@@ -19,11 +19,11 @@ def content_layer_loss(p, x):
     _, h, w, d = p.get_shape()
     M = h.value * w.value
     N = d.value
-    if config['content_loss_function']   == 1:
+    if config['content_loss_constant']   == 1:
         K = 1. / (2. * N**0.5 * M**0.5)
-    elif config['content_loss_function'] == 2:
+    elif config['content_loss_constant'] == 2:
         K = 1. / (N * M)
-    elif config['content_loss_function'] == 3:
+    elif config['content_loss_constant'] == 3:
         K = 1. / 2.
     else:
         raise ValueError()
@@ -60,7 +60,7 @@ def sum_style_losses(sess, net, style_imgs):
     supposed to calculate the style loss using these activations
     """
     total_style_loss = 0.
-    weights = config['style_imgs_weights']
+    weights = config['style_image_weights']
     for img, img_weight in zip(style_imgs, weights):
         sess.run(net['input'].assign(img))
         style_loss = 0.
@@ -130,6 +130,8 @@ def minimize_with_adam(sess, net, optimizer, init_img, loss, content_img):
             print("At iterate {}\tf=  {}".format(iterations, curr_loss))
         iterations += 1
 
+def save_checkpoint(checkpoint_img, iteration):
+    write_image('checkpoints/'+'checkpoint'+str(iteration)+'.png', checkpoint_img)
 
 def stylize(content_img, style_imgs, init_img, frame=None):
     if config['debug']:
@@ -157,15 +159,15 @@ def stylize(content_img, style_imgs, init_img, frame=None):
         L_total += beta  * L_style
         L_total += theta * L_tv
 
-    # optimization algorithm
-    optimizer = get_optimizer(L_total)
+        # optimization algorithm
+        optimizer = get_optimizer(L_total)
 
-    if config['optimizer'] == 'adam':
-        minimize_with_adam(sess, net, optimizer, init_img, L_total, np.copy(content_img))
-    elif config['optimizer'] == 'lbfgs':
-        minimize_with_lbfgs(sess, net, optimizer, init_img)
+        if config['optimizer'] == 'adam':
+            minimize_with_adam(sess, net, optimizer, init_img, L_total, np.copy(content_img))
+        elif config['optimizer'] == 'lbfgs':
+            minimize_with_lbfgs(sess, net, optimizer, init_img)
 
-    output_img = sess.run(net['input'])
+        output_img = sess.run(net['input'])
 
     # TODO: CHANGE THIS
     # if config['original_colors']:
@@ -174,13 +176,16 @@ def stylize(content_img, style_imgs, init_img, frame=None):
     write_image_output(output_img, content_img, style_imgs, init_img)
 
 def render_single_image():
-    content_img = get_content_image(config['content_img'])
+    content_img = get_content_image(config['content_image'])
     style_imgs = get_style_images(content_img)
     with tf.Graph().as_default():
         print('\n---- RENDERING SINGLE IMAGE ----\n')
-        init_img = get_init_image(config['init_img_type'], content_img, \
-                            style_imgs, init_img_path = config['init_img_path'])
+        init_img = get_init_image(config['init_image_type'], content_img, \
+                            style_imgs, init_img_path = config['init_image_path'])
         tick = time.time()
         stylize(content_img, style_imgs, init_img)
         tock = time.time()
         print('Single image elapsed time: {}'.format(tock - tick))
+
+if __name__=="__main__":
+    render_single_image()

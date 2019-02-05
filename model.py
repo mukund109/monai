@@ -1,6 +1,9 @@
 import scipy.io
+from utils import get_config
+import tensorflow as tf
+import numpy as np
 
-config = json.load(open('config.json'))
+config = get_config()
 
 # helper function for loading VGG weights
 def get_weights(vgg_layers, i):
@@ -91,25 +94,25 @@ def build_model(input_img):
     return net
 
 def conv_layer(layer_name, layer_input, W):
-  conv = tf.nn.conv2d(layer_input, W, strides=[1, 1, 1, 1], padding='SAME')
-  if config['verbose']: print('--{} | shape={} | weights_shape={}'.format(layer_name,
-    conv.get_shape(), W.get_shape()))
-  return conv
+    conv = tf.nn.conv2d(layer_input, W, strides=[1, 1, 1, 1], padding='SAME')
+    if config['verbose']: print('--{} | shape={} | weights_shape={}'.format(layer_name,
+        conv.get_shape(), W.get_shape()))
+    return conv
 
 def relu_layer(layer_name, layer_input, b):
-  relu = tf.nn.relu(layer_input + b)
-  if config['verbose']:
-    print('--{} | shape={} | bias_shape={}'.format(layer_name, relu.get_shape(),
-      b.get_shape()))
-  return relu
+    relu = tf.nn.relu(layer_input + b)
+    if config['verbose']:
+        print('--{} | shape={} | bias_shape={}'.format(layer_name, relu.get_shape(),
+          b.get_shape()))
+    return relu
 
 def pool_layer(layer_name, layer_input):
-  if config['pooling_type'] == 'avg':
-    pool = tf.nn.avg_pool(layer_input, ksize=[1, 2, 2, 1],
-      strides=[1, 2, 2, 1], padding='SAME')
-  elif config['pooling_type'] == 'max':
-    pool = tf.nn.max_pool(layer_input, ksize=[1, 2, 2, 1],
-      strides=[1, 2, 2, 1], padding='SAME')
-  if config['verbose']:
-    print('--{}   | shape={}'.format(layer_name, pool.get_shape()))
-  return pool
+    if config['pooling_type'] == 'avg':
+        pool = tf.nn.avg_pool(layer_input, ksize=[1, 2, 2, 1],
+            strides=[1, 2, 2, 1], padding='SAME')
+    elif config['pooling_type'] == 'max':
+        pool = tf.nn.max_pool(layer_input, ksize=[1, 2, 2, 1],
+            strides=[1, 2, 2, 1], padding='SAME')
+    if config['verbose']:
+        print('--{}   | shape={}'.format(layer_name, pool.get_shape()))
+    return pool
