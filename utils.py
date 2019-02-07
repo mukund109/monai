@@ -3,6 +3,7 @@ import cv2
 import numpy as np
 from collections import OrderedDict
 import os
+import errno
 
 def get_config():
     json_str = ''
@@ -35,8 +36,13 @@ def write_image(path, img):
     img = postprocess(img)
     cv2.imwrite(path, img)
 
+def save_checkpoint(checkpoint_img, iteration):
+    maybe_make_directory('checkpoints')
+    write_image('checkpoints/'+'checkpoint'+str(iteration)+'.png', checkpoint_img)
+
 def preprocess(img):
     imgpre = np.copy(img)
+    imgpre = imgpre.astype(np.float32)
     # bgr to rgb
     imgpre = imgpre[...,::-1]
     # shape (h, w, d) to (1, h, w, d)
@@ -75,39 +81,30 @@ def normalize(weights):
         return [float(i) / denom for i in weights]
     else: return [0.] * len(weights)
 
-def get_content_image(content_img):
+def get_content_image(content_img, size=None):
     path = content_img
+
     # bgr image
     img = cv2.imread(path, cv2.IMREAD_COLOR)
     check_image(img, path)
-    img = img.astype(np.float32)
     h, w, d = img.shape
+    if size is not None:
+        h, w = size
 
     #resize content image to size of required output image
-    h, w = int(h*config['output_scale']), int(w*config['output_scale'])
-    img = cv2.resize(img, dsize=(h, w), interpolation = cv2.INTER_LANCZOS4)
+    img = cv2.resize(img, dsize=(w, h), interpolation = cv2.INTER_LANCZOS4)
 
-    # mx = config['max_size']
-    # # resize if > max size
-    # if h > w and h > mx:
-    #     w = (float(mx) / float(h)) * w
-    #     img = cv2.resize(img, dsize=(int(w), mx), interpolation=cv2.INTER_AREA)
-    # if w > mx:
-    #     h = (float(mx) / float(w)) * h
-    #     img = cv2.resize(img, dsize=(mx, int(h)), interpolation=cv2.INTER_AREA)
     img = preprocess(img)
     return img
 
-def get_style_images(content_img):
-    _, ch, cw, cd = content_img.shape
+def get_style_images(paths, size):
+    h, w, = size
     style_imgs = []
-    for style_fn in config['style_images']:
-        path = style_fn
+    for path in paths:
         # bgr image
         img = cv2.imread(path, cv2.IMREAD_COLOR)
         check_image(img, path)
-        img = img.astype(np.float32)
-        img = cv2.resize(img, dsize=(cw, ch), interpolation=cv2.INTER_AREA)
+        img = cv2.resize(img, dsize=(w, h), interpolation=cv2.INTER_LANCZOS4)
         img = preprocess(img)
         style_imgs.append(img)
     return style_imgs
@@ -118,14 +115,14 @@ def get_init_image(init_type, content_img, style_imgs, frame=None, init_img_path
     elif init_type == 'style':
         return style_imgs[0]
     elif init_type == 'random':
-        init_img = get_noise_image(args.noise_ratio, content_img)
+        init_img = get_noise_image(config['noise_ratio'], content_img)
         return init_img
     elif init_type == 'custom':
         init_img = cv2.imread(init_img_path, cv2.IMREAD_COLOR)
         check_image(init_img, init_img_path)
         init_img = init_img.astype(np.float32)
         _, h, w, _ = content_img.shape
-        init_img = cv2.resize(init_img, dsize=(int(h), int(w)), interpolation=cv2.INTER_AREA)
+        init_img = cv2.resize(init_img, dsize=(int(h), int(w)), interpolation=cv2.INTER_LANCZOS4)
         return preprocess(init_img)
     else:
         raise FileNotFoundError()
@@ -150,3 +147,7 @@ def write_image_output(output_img, content_img, style_imgs, init_img):
     out_file = os.path.join(out_dir, 'meta_data.json')
     with open(out_file, 'w') as f:
         json.dump(config, f)
+
+if __name__=='__main__':
+    #cv2.imwrite('test.png', postprocess(get_content_image('sample_images/aurat_50.jpeg', (200,250))))
+    cv2.imwrite('test.png', postprocess(get_style_images(['sample_images/style_50.jpg'], (50,300))[0]))

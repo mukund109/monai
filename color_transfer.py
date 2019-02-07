@@ -150,6 +150,6 @@ def _scale_array(arr, clip=True):
     return scaled
 
 if __name__=='__main__':
-    source = cv2.imread('image_input/aurat.jpeg')
-    target = cv2.imread('styles/portrait5.jpg')
-    cv2.imwrite('styles/portrait5_synthetic.jpg', color_transfer(source, target, preserve_paper=False))
+    source = cv2.imread('images/beard.jpg')
+    target = cv2.imread('images/gogh2.jpg')
+    cv2.imwrite('images/gogh2_ct.jpg', color_transfer(source, target, preserve_paper=False))

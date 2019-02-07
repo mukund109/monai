@@ -1,28 +1,28 @@
 {
-  "debug":true,
+  "debug":false,
   "verbose":true,
-  "model_weights":"vgg_pretrained/imagenet-vgg-verydeep-19.mat",
+  "model_weights":"/vgg19_weights/imagenet-vgg-verydeep-19.mat",
   "device":"/gpu:0",
 
-  "optimizer":"adam",
+  "optimizer":"adam", //adam_or_lbfgs
   "learning_rate":1e0,
-  "max_iterations":100,
+  "max_iterations":600,
 
-  "style_images":["sample_images/style_50.jpg"],
-  "style_image_weights":[1], //adam_or_lbfgs
+  "style_images":["images/gogh.jpg"],
+  "style_image_weights":[1],
   "style_weight": 1e4, //default=1e4
   "style_layers":["relu1_1", "relu2_1", "relu3_1", "relu4_1", "relu5_1"],
   "style_layer_weights":[0.2,0.2,0.2,0.2,0.2],
 
-  "tv_weight":1e-3, //default=1e-3
+  "tv_weight":1e-1, //default=1e-3
 
-  "content_image": "sample_images/aurat_50.jpeg",
+  "content_image": "images/beard.jpg",
   "output_scale":1,
-  "content_weight":5e0, //default=5e0
+  "content_weight":1e0, //default=5e0
   //content preprocessing
   "content_loss_constant":1, //choice[1,2,3]
   "content_layers":["conv4_2"],
-  "pooling_type":"avg", //['avg','max']
+  "pooling_type":"max", //['avg','max']
   "content_layer_weights":[1],
 
   "image_output_dir":"results",
@@ -31,7 +31,7 @@
   "color_convert_type":"yuv", //['yuv', 'ycrcb', 'luv', 'lab']
   "color_convert_time":"after", //['after','before']
 
-  "init_image_type": "content", //["content", "random", "style", "custom"], others
-  "init_image_path":"yoyo.jpg",
+  "init_image_type": "content", //["content", "random", "style", "custom"]
+  "init_image_path":"images/beard.jpg",
   "noise_ratio":0.5
 }

@@ -1,8 +1,9 @@
 import numpy as np
 from model import build_model
-from utils import get_content_image, get_style_images, get_init_image, get_config, write_image, write_image_output
+from utils import get_content_image, get_style_images, get_init_image, save_checkpoint
+from utils import get_config, write_image, write_image_output, postprocess
+from utils import preprocess
 import struct
-import errno
 import time
 import cv2
 import os
@@ -41,9 +42,10 @@ def style_layer_loss(a, x):
         M = h.value * w.value
         N = d.value
         A = gram_matrix(a, M, N)
-        tf.summary.image(a.name, A[tf.newaxis, :,:,tf.newaxis])
         G = gram_matrix(x, M, N)
-        tf.summary.image('input_gram_matrix', G[tf.newaxis, :, :, tf.newaxis])
+        # with tf.device('/cpu:0'):
+        #     tf.summary.image(a.name, A[tf.newaxis, :,:,tf.newaxis])
+        #     tf.summary.image('input_gram_matrix', G[tf.newaxis, :, :, tf.newaxis])
         loss = (1./(4 * N**2 * M**2)) * tf.reduce_sum(tf.pow((G - A), 2))
     return loss
 
@@ -109,8 +111,7 @@ def minimize_with_lbfgs(sess, net, optimizer, init_img):
     sess.run(net['input'].assign(init_img))
     optimizer.minimize(sess)
 
-def minimize_with_adam(sess, net, optimizer, init_img, loss, content_img, \
-                                                        writer, summary):
+def minimize_with_adam(sess, net, optimizer, init_img, loss, content_img):#, writer, summary):
     if config['verbose']: print('\nMINIMIZING LOSS USING: ADAM OPTIMIZER')
 
     train_op = optimizer.minimize(loss)
@@ -120,9 +121,9 @@ def minimize_with_adam(sess, net, optimizer, init_img, loss, content_img, \
     iterations = 0
     while (iterations < config['max_iterations']):
         sess.run(train_op)
-        if (iterations%20 == 0):
-            recorded_summary = sess.run(summary)
-            writer.add_summary(recorded_summary, iterations)
+        # if (iterations%20 == 0):
+        #     recorded_summary = sess.run(summary)
+        #     writer.add_summary(recorded_summary, iterations)
         if config['verbose'] and (iterations%50 == 0):
             curr_loss = loss.eval()
 
@@ -137,8 +138,6 @@ def minimize_with_adam(sess, net, optimizer, init_img, loss, content_img, \
             print("At iterate {}\tf=  {}".format(iterations, curr_loss))
         iterations += 1
 
-def save_checkpoint(checkpoint_img, iteration):
-    write_image('checkpoints/'+'checkpoint'+str(iteration)+'.png', checkpoint_img)
 
 def stylize(content_img, style_imgs, init_img, frame=None):
     if config['debug']:
@@ -168,41 +167,71 @@ def stylize(content_img, style_imgs, init_img, frame=None):
         L_total += beta  * L_style
         L_total += theta * L_tv
 
-        tf_writer = tf.summary.FileWriter('summary', sess.graph)
-        tf.summary.scalar('Content Loss', L_content)
-        tf.summary.scalar('Style Loss', L_style)
-        tf.summary.scalar('Variation Loss', L_tv)
-        tf.summary.scalar('Total Loss', L_total)
-        tf.summary.image('Stylized Image', net['input'])
-        summary_op = tf.summary.merge_all()
+        # tf_writer = tf.summary.FileWriter('summary', sess.graph)
+        # with tf.device('/cpu:0'):
+        #     tf.summary.scalar('Content Loss', L_content)
+        #     tf.summary.scalar('Style Loss', L_style)
+        #     tf.summary.scalar('Variation Loss', L_tv)
+        #     tf.summary.scalar('Total Loss', L_total)
+        #     tf.summary.image('Stylized Image', net['input'])
+        #     summary_op = tf.summary.merge_all()
         # optimization algorithm
         optimizer = get_optimizer(L_total)
 
         if config['optimizer'] == 'adam':
             minimize_with_adam(sess, net, optimizer, init_img, L_total, \
-                np.copy(content_img), tf_writer, summary_op)
+                np.copy(content_img))#, tf_writer, summary_op)
         elif config['optimizer'] == 'lbfgs':
             minimize_with_lbfgs(sess, net, optimizer, init_img)
 
         output_img = sess.run(net['input'])
 
-    # TODO: CHANGE THIS
-    # if config['original_colors']:
-    #     output_img = convert_to_original_colors(np.copy(content_img), output_img)
+    return output_img
 
-    write_image_output(output_img, content_img, style_imgs, init_img)
+def render_single_image(content_img, style_imgs, init_img):
 
-def render_single_image():
-    content_img = get_content_image(config['content_image'])
-    style_imgs = get_style_images(content_img)
     with tf.Graph().as_default():
         print('\n---- RENDERING SINGLE IMAGE ----\n')
-        init_img = get_init_image(config['init_image_type'], content_img, \
-                            style_imgs, init_img_path = config['init_image_path'])
+
         tick = time.time()
-        stylize(content_img, style_imgs, init_img)
+        output = stylize(content_img, style_imgs, init_img)
         tock = time.time()
         print('Single image elapsed time: {}'.format(tock - tick))
 
+    return output
+
+
+def render_multiple():
+    content_img = get_content_image(config['content_image'], (300,300))
+    style_imgs = get_style_images(config['style_images'], (300,300))
+    init_img = get_init_image(config['init_image_type'], content_img, \
+                        style_imgs, init_img_path = config['init_image_path'])
+
+    output = render_single_image(content_img, style_imgs, init_img)
+
+    #write_image_output(output, content_img, style_imgs, init_img)
+    init_img = preprocess(cv2.resize(postprocess(output), dsize=(600,600), interpolation=cv2.INTER_LANCZOS4))
+    content_img = get_content_image(config['content_image'], (600,600))
+    style_imgs = get_style_images(config['style_images'], (600,600))
+
+    output2 = render_single_image(content_img, style_imgs, init_img)
+
+    write_image_output(output2, content_img, style_imgs, init_img)
+    # init_img = preprocess(cv2.resize(postprocess(output2), dsize=(1200,1200), interpolation=cv2.INTER_LANCZOS4))
+    # content_img = get_content_image(config['content_image'], (1200,1200))
+    # style_imgs = get_style_images(config['style_images'], (1200,1200))
+    #
+    # output3 = render_single_image(content_img, style_imgs, init_img)
+    #
+    # write_image_output(output3, content_img, style_imgs, init_img)
+    #
+    # init_img = preprocess(cv2.resize(postprocess(output3), dsize=(2000,2000), interpolation=cv2.INTER_LANCZOS4))
+    # content_img = get_content_image(config['content_image'], (2000,2000))
+    # style_imgs = get_style_images(config['style_images'], (2000,2000))
+    #
+    # output4 = render_single_image(content_img, style_imgs, init_img)
+    # write_image_output(output4, content_img, style_imgs, init_img)
+
+
 if __name__=="__main__":
-    render_single_image()
+    render_multiple()

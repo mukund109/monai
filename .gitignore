@@ -105,5 +105,9 @@ venv.bak/
 
 sample_images
 summary
-vgg_pretrained
+vgg19_weights
 results
+
+.floydexpt
+.floydignore
+floyd.yml
