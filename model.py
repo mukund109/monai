@@ -1,124 +1,197 @@
-from utils import get_config
-print("what what what what")
+from vgg19 import build_vgg
 import tensorflow as tf
 import numpy as np
-import scipy.io
+from logger import CustomLogger
 
-config = get_config()
+def _gram_matrix(x, num_activations, num_features):
+    """
+    Returns gram matrix, given matrix X, with shape (num_activations, num_features)
+    """
+    F = tf.reshape(x, (-1, num_activations, num_features))
+    G = tf.matmul(tf.transpose(F, perm=[0,2,1]), F)
 
-# helper function for loading VGG weights
-def get_weights(vgg_layers, i):
-    weights = vgg_layers[i][0][0][2][0][0]
-    W = tf.constant(weights)
-    return W
+    # this takes the sum of the gram matrices of all images in the batch
+    G = tf.reduce_sum(G, axis=0)
 
-#helper function for loading VGG bias weights
-def get_bias(vgg_layers, i):
-    bias = vgg_layers[i][0][0][2][0][1]
-    b = tf.constant(np.reshape(bias, (bias.size)))
-    return b
+    G = G/num_activations
+    return G
 
-def build_model(input_img):
-    if config['verbose']: print('\nBUILDING VGG-19 NETWORK')
-    net = {}
-    _, h, w, d     = input_img.shape
+class CoarseFineModel(object):
+    def __init__(self, config):
+        self.config = config
 
-    if config['verbose']: print('loading model weights...')
-    vgg_rawnet     = scipy.io.loadmat(config['model_weights'])
-    vgg_layers     = vgg_rawnet['layers'][0]
-    if config['verbose']: print('constructing layers...')
-    net['input']   = tf.Variable(np.zeros((1, h, w, d), dtype=np.float32), name='input')
+    def build_style_loss(self):
+        """
+        This function constructs the tensorfow ops required to calculate the
+        style loss. The gram matrices of the style image are declared as
+        placeholders
+        """
+        self.style_gram = dict()
+        self.input_gram = dict()
+        style_losses = []
+        self.style_loss = 0.
+        for layer, weight in zip(self.config['style_layers'], self.config['style_layer_weights']):
 
-    if config['verbose']: print('LAYER GROUP 1')
-    with tf.name_scope('layer1'):
-        net['conv1_1'] = conv_layer('conv1_1', net['input'], W=get_weights(vgg_layers, 0))
-        net['relu1_1'] = relu_layer('relu1_1', net['conv1_1'], b=get_bias(vgg_layers, 0))
+            x = self.net[layer]
+            _, feature_h, feature_w, num_features = x.get_shape()
+            feature_size = feature_h.value * feature_w.value
+            num_features = num_features.value
 
-        net['conv1_2'] = conv_layer('conv1_2', net['relu1_1'], W=get_weights(vgg_layers, 2))
-        net['relu1_2'] = relu_layer('relu1_2', net['conv1_2'], b=get_bias(vgg_layers, 2))
+            self.style_gram[layer] = tf.placeholder(dtype=tf.float32, \
+                                        shape=[num_features]*2, \
+                                        name = "style_gram_{}".format(layer))
 
-        net['pool1']   = pool_layer('pool1', net['relu1_2'])
+            with tf.name_scope("input_gram_{}".format(layer)):
+                self.input_gram[layer] = _gram_matrix(x, feature_size, num_features)
 
-    if config['verbose']: print('LAYER GROUP 2')
-    with tf.name_scope('layer2'):
-        net['conv2_1'] = conv_layer('conv2_1', net['pool1'], W=get_weights(vgg_layers, 5))
-        net['relu2_1'] = relu_layer('relu2_1', net['conv2_1'], b=get_bias(vgg_layers, 5))
+            with tf.name_scope("style_loss_{}".format(layer)):
+                diff = self.input_gram[layer] - self.style_gram[layer]
+                loss = tf.reduce_sum(tf.pow((diff), 2)) / (4 * num_features**2)
+                style_losses.append(loss * weight)
 
-        net['conv2_2'] = conv_layer('conv2_2', net['relu2_1'], W=get_weights(vgg_layers, 7))
-        net['relu2_2'] = relu_layer('relu2_2', net['conv2_2'], b=get_bias(vgg_layers, 7))
+        self.style_loss = tf.add_n(style_losses, name='cumulative_style_loss')
 
-        net['pool2']   = pool_layer('pool2', net['relu2_2'])
+    def build_content_loss(self):
+        """
+        This function constructs the tensorfow ops required to calculate the
+        content loss. The feature maps of the content image are declared as
+        placeholders
+        """
+        self.content_features = dict()
+        self.content_loss = 0.
+        for layer, weight in zip(self.config['content_layers'], \
+                                        self.config['content_layer_weights']):
+            x = self.net[layer]
+            b, h, w, d = x.get_shape()
+            b, h, w, d = b.value, h.value, w.value, d.value
+            feature_size, num_features = h*w, d
 
-    if config['verbose']: print('LAYER GROUP 3')
-    with tf.name_scope('layer3'):
-        net['conv3_1'] = conv_layer('conv3_1', net['pool2'], W=get_weights(vgg_layers, 10))
-        net['relu3_1'] = relu_layer('relu3_1', net['conv3_1'], b=get_bias(vgg_layers, 10))
+            y = tf.placeholder(dtype=tf.float32, \
+                                    shape=(b, h, w, d), \
+                                    name = "content_features_{}".format(layer))
 
-        net['conv3_2'] = conv_layer('conv3_2', net['relu3_1'], W=get_weights(vgg_layers, 12))
-        net['relu3_2'] = relu_layer('relu3_2', net['conv3_2'], b=get_bias(vgg_layers, 12))
+            self.content_features[layer] = y
 
-        net['conv3_3'] = conv_layer('conv3_3', net['relu3_2'], W=get_weights(vgg_layers, 14))
-        net['relu3_3'] = relu_layer('relu3_3', net['conv3_3'], b=get_bias(vgg_layers, 14))
+            with tf.name_scope('content_loss'):
+                K = num_features*feature_size
+                norm = tf.convert_to_tensor(1/K, name='normalization_constant')
+                loss = norm * tf.reduce_sum(tf.pow((x - y), 2))
+                self.content_loss += loss * weight
 
-        net['conv3_4'] = conv_layer('conv3_4', net['relu3_3'], W=get_weights(vgg_layers, 16))
-        net['relu3_4'] = relu_layer('relu3_4', net['conv3_4'], b=get_bias(vgg_layers, 16))
+    def build_network(self, sess, h, w, d):
+        self.net = build_vgg(sess, h, w, d, self.config)
+        self.build_style_loss()
+        self.build_content_loss()
 
-        net['pool3']   = pool_layer('pool3', net['relu3_4'])
+        # TODO: denoising loss, weighted sum
+        with tf.name_scope('total_loss'):
+            style_wt = self.config['style_weight']
+            content_wt = self.config['content_weight']
+            self.total_loss = style_wt*self.style_loss + content_wt*self.content_loss
 
-    if config['verbose']: print('LAYER GROUP 4')
-    with tf.name_scope('layer4'):
-        net['conv4_1'] = conv_layer('conv4_1', net['pool3'], W=get_weights(vgg_layers, 19))
-        net['relu4_1'] = relu_layer('relu4_1', net['conv4_1'], b=get_bias(vgg_layers, 19))
+    def get_content_features(self, sess, image):
+        """
+        Computes the features maps of the image, corresponding to the layers
+        mentioned in config['content_layers'], returns a dict of numpy arrays
+        """
+        assert image.shape == self.net['input'].shape
+        sess.run(self.net['input'].assign(image))
+        feature_maps = dict()
+        for layer in self.config['content_layers']:
+            feature_maps[layer] = sess.run(self.net[layer])
+        return feature_maps
 
-        net['conv4_2'] = conv_layer('conv4_2', net['relu4_1'], W=get_weights(vgg_layers, 21))
-        net['relu4_2'] = relu_layer('relu4_2', net['conv4_2'], b=get_bias(vgg_layers, 21))
+    def get_style_gram(self, sess, image):
+        """
+        Computes the gram matrices of the image, corresponding to the features
+        mentioned in config['style_layers'], returns a dict of numpy arrays
+        """
+        assert image.shape == self.net['input'].shape
+        sess.run(self.net['input'].assign(image))
+        gram_matrices = dict()
+        for layer in self.config['style_layers']:
+            gram_matrices[layer] = sess.run(self.input_gram[layer])
 
-        net['conv4_3'] = conv_layer('conv4_3', net['relu4_2'], W=get_weights(vgg_layers, 23))
-        net['relu4_3'] = relu_layer('relu4_3', net['conv4_3'], b=get_bias(vgg_layers, 23))
+        return gram_matrices
 
-        net['conv4_4'] = conv_layer('conv4_4', net['relu4_3'], W=get_weights(vgg_layers, 25))
-        net['relu4_4'] = relu_layer('relu4_4', net['conv4_4'], b=get_bias(vgg_layers, 25))
+    def get_feed_dict(self, sess, content_image, style_images, weights):
+        feed_dict = dict()
+        #Feeding content features
+        content_features = self.get_content_features(sess, content_image)
+        for layer, placeholder in self.content_features.items():
+            feed_dict[placeholder] = content_features[layer]
 
-        net['pool4']   = pool_layer('pool4', net['relu4_4'])
+        #Feeding style features
+        for image, weight in zip(style_images, weights):
+            grams = self.get_style_gram(sess, image)
+            for layer, placeholder in self.style_gram.items():
+                if placeholder not in feed_dict.keys():
+                    feed_dict[placeholder] = weight*grams[layer]
+                else:
+                    feed_dict[placeholder] += weight*grams[layer]
 
-    if config['verbose']: print('LAYER GROUP 5')
-    with tf.name_scope('layer5'):
-        net['conv5_1'] = conv_layer('conv5_1', net['pool4'], W=get_weights(vgg_layers, 28))
-        net['relu5_1'] = relu_layer('relu5_1', net['conv5_1'], b=get_bias(vgg_layers, 28))
+        return feed_dict
 
-        net['conv5_2'] = conv_layer('conv5_2', net['relu5_1'], W=get_weights(vgg_layers, 30))
-        net['relu5_2'] = relu_layer('relu5_2', net['conv5_2'], b=get_bias(vgg_layers, 30))
+    def stylize(self, sess, content_image, style_images, init_img):
+        feed_dict = self.get_feed_dict(sess, content_image, style_images, \
+                                            self.config['style_image_weights'])
 
-        net['conv5_3'] = conv_layer('conv5_3', net['relu5_2'], W=get_weights(vgg_layers, 32))
-        net['relu5_3'] = relu_layer('relu5_3', net['conv5_3'], b=get_bias(vgg_layers, 32))
+        logger = self.init_logger(sess)
 
-        net['conv5_4'] = conv_layer('conv5_4', net['relu5_3'], W=get_weights(vgg_layers, 34))
-        net['relu5_4'] = relu_layer('relu5_4', net['conv5_4'], b=get_bias(vgg_layers, 34))
+        # initializing optimizer
+        if self.config['verbose']: print("Initializing optimizer")
+        optimizer = tf.contrib.opt.ScipyOptimizerInterface(
+                self.total_loss, method='L-BFGS-B',
+                options={'maxiter': self.config['max_iterations'],
+                          'disp': 50})
 
-        net['pool5']   = pool_layer('pool5', net['relu5_4'])
+        output = self.run_optimizer(sess, optimizer, logger, feed_dict, init_img)
 
-    return net
+        return output
 
-def conv_layer(layer_name, layer_input, W):
-    conv = tf.nn.conv2d(layer_input, W, strides=[1, 1, 1, 1], padding='SAME')
-    if config['verbose']: print('--{} | shape={} | weights_shape={}'.format(layer_name,
-        conv.get_shape(), W.get_shape()))
-    return conv
+    def run_optimizer(self, sess, optimizer, logger, feed_dict, init_img, num_iters=50):
 
-def relu_layer(layer_name, layer_input, b):
-    relu = tf.nn.relu(layer_input + b)
-    if config['verbose']:
-        print('--{} | shape={} | bias_shape={}'.format(layer_name, relu.get_shape(),
-          b.get_shape()))
-    return relu
+        # This is a callback function that increments global step and writes summary
+        # its a workaround because scipy optimizers don't update the graph
+        # at every step, so instead 'step_summary' is passed as a callback to the
+        # 'optimizer', and custom summary statistics are recorded
+        # https://stackoverflow.com/questions/44685228/how-to-get-loss-function-history-using-tf-contrib-opt-scipyoptimizerinterface
+        def _step_summary(tloss, sloss, closs, image):
+            #increment global step
+            logger.increment_global_step()
+            step_value = logger.global_step
+            if step_value%5 == 0:
+                logger.log_scalar("Total_loss", tloss, step_value)
+                logger.log_scalar("Style_loss", sloss, step_value)
+                logger.log_scalar("Content_loss", closs, step_value)
+            if step_value%50 == 0:
+                # TODO: postprocess image before writing
+                logger.log_images("Stylized_image", [image[0]], step_value)
 
-def pool_layer(layer_name, layer_input):
-    if config['pooling_type'] == 'avg':
-        pool = tf.nn.avg_pool(layer_input, ksize=[1, 2, 2, 1],
-            strides=[1, 2, 2, 1], padding='SAME')
-    elif config['pooling_type'] == 'max':
-        pool = tf.nn.max_pool(layer_input, ksize=[1, 2, 2, 1],
-            strides=[1, 2, 2, 1], padding='SAME')
-    if config['verbose']:
-        print('--{}   | shape={}'.format(layer_name, pool.get_shape()))
-    return pool
+        sess.run(self.net['input'].assign(init_img))
+        optimizer.minimize(sess, feed_dict, fetches=[self.total_loss, \
+                            self.style_loss, self.content_loss,\
+                            self.net['input']], loss_callback= _step_summary)
+        return sess.run(self.net['input'])
+
+    def init_logger(self, sess, custom=True):
+        if custom:
+            return CustomLogger(self.config['log_dir'], sess.graph)
+
+    def run(self, h, w, d, content, styles, init):
+        with tf.Session() as sess:
+            self.build_network(sess, h, w, d)
+            output = self.stylize(sess, content, styles, init)
+        return output
+
+if __name__=='__main__':
+    from utils import get_config, get_content_image, get_style_images, get_init_image
+    import matplotlib.pyplot as plt
+    config = get_config()
+    content_img = get_content_image(config['content_image'], (40,40))
+    style_imgs = get_style_images(config['style_images'], (40,40))
+    init_img = get_init_image(config['init_image_type'], content_img, \
+                        style_imgs, init_img_path = config['init_image_path'])
+    a = CoarseFineModel(config)
+    output = a.run(40,40,3, content_img, style_imgs, init_img)
+    plt.imsave('output.jpg', output[0])

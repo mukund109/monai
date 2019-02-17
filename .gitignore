@@ -104,6 +104,7 @@ venv.bak/
 .mypy_cache/
 
 sample_images
+images
 summary
 vgg19_weights
 results
