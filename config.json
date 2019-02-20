@@ -1,30 +1,34 @@
 {
   "debug":false,
   "verbose":true,
-  "model_weights":"vgg19_weights/imagenet-vgg-verydeep-19.mat",
+  "model_weights":"/vgg19_weights/imagenet-vgg-verydeep-19.mat",
   "device":"/gpu:0",
   "log_dir":"summary",
 
   "optimizer":"lbfgs", //adam_or_lbfgs
   "learning_rate":1e0,
-  "max_iterations":600,
+  "max_iterations":200,
+  "max_iterations_per_tile":50,
+  "max_image_passes":2, //for multiresolution, total_global_steps = passes * iterations_per_tile * num_tiles
+  "optimize_tile_with_global_gram":false,
 
-  "style_images":["images/sorrow.png", "images/sorrow3.png", "images/helplessness3.png"],
-  "style_image_weights":[0.33,0.33,0.34],
-  "style_weight": 1e4, //default=1e4
+  "style_images":["images/head_of_pros_GAP.jpg", "images/old_man_portrait_GAP.jpg"],
+  "style_image_weights":[0.5,0.5],
+  "style_weight": 5e3, //default=1e4
   "style_layers":["relu1_1", "relu2_1", "relu3_1", "relu4_1", "relu5_1"],
-  "style_layer_weights":[0.2,0.2,0.2,0.2,0.2],
+  "style_layer_weights":[0.2,0.3,0.3,0.2,0.0],
 
-  "tv_weight":1e-2, //default=1e-3
+  "tv_weight":1e2, //default=1e-3
 
-  "content_image": "images/close_up_4.png",
-  "output_scale":1,
-  "content_weight":1e0, //default=5e0
+  "content_image": "images/aurat.jpeg",
+  "content_weight":2e4, //default=5e0
   //content preprocessing
   "content_loss_constant":2, //choice[1,2,3]
   "content_layers":["conv4_2"],
   "pooling_type":"max", //['avg','max']
   "content_layer_weights":[1],
+
+  "neural_matching_layer":"pool3",
 
   "image_output_dir":"results",
   "original_colors":true,
@@ -32,7 +36,8 @@
   "color_convert_type":"yuv", //['yuv', 'ycrcb', 'luv', 'lab']
   "color_convert_time":"after", //['after','before']
 
-  "init_image_type": "random", //["content", "random", "style", "custom"]
+  "init_image_type": "content", //["content", "random", "style", "custom"]
+  "random_seed":0,
   "init_image_path":"images/stock2.jpg",
-  "noise_ratio":0.5
+  "noise_ratio":1
 }

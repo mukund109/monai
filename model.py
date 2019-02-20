@@ -2,6 +2,7 @@ from vgg19 import build_vgg
 import tensorflow as tf
 import numpy as np
 from logger import CustomLogger
+from utils import postprocess
 
 def _gram_matrix(x, num_activations, num_features):
     """
@@ -17,10 +18,12 @@ def _gram_matrix(x, num_activations, num_features):
     return G
 
 class CoarseFineModel(object):
-    def __init__(self, config):
+    def __init__(self, sess, config, height, width):
         self.config = config
+        self._build_network(sess, height, width, 3)
+        self.logger = None
 
-    def build_style_loss(self):
+    def _build_style_loss(self):
         """
         This function constructs the tensorfow ops required to calculate the
         style loss. The gram matrices of the style image are declared as
@@ -45,13 +48,13 @@ class CoarseFineModel(object):
                 self.input_gram[layer] = _gram_matrix(x, feature_size, num_features)
 
             with tf.name_scope("style_loss_{}".format(layer)):
-                diff = self.input_gram[layer] - self.style_gram[layer]
+                diff =  self.style_gram[layer] - self.input_gram[layer]
                 loss = tf.reduce_sum(tf.pow((diff), 2)) / (4 * num_features**2)
                 style_losses.append(loss * weight)
 
         self.style_loss = tf.add_n(style_losses, name='cumulative_style_loss')
 
-    def build_content_loss(self):
+    def _build_content_loss(self):
         """
         This function constructs the tensorfow ops required to calculate the
         content loss. The feature maps of the content image are declared as
@@ -78,16 +81,20 @@ class CoarseFineModel(object):
                 loss = norm * tf.reduce_sum(tf.pow((x - y), 2))
                 self.content_loss += loss * weight
 
-    def build_network(self, sess, h, w, d):
+    def _build_network(self, sess, h, w, d):
         self.net = build_vgg(sess, h, w, d, self.config)
-        self.build_style_loss()
-        self.build_content_loss()
+        self._build_style_loss()
+        self._build_content_loss()
+
+        with tf.name_scope('total_variation_loss'):
+            self.tv_loss = tf.reduce_sum(tf.image.total_variation(self.net['input']))
 
         # TODO: denoising loss, weighted sum
         with tf.name_scope('total_loss'):
             style_wt = self.config['style_weight']
             content_wt = self.config['content_weight']
-            self.total_loss = style_wt*self.style_loss + content_wt*self.content_loss
+            tv_weight = self.config['tv_weight']
+            self.total_loss = style_wt*self.style_loss + content_wt*self.content_loss + tv_weight*self.tv_loss
 
     def get_content_features(self, sess, image):
         """
@@ -114,7 +121,8 @@ class CoarseFineModel(object):
 
         return gram_matrices
 
-    def get_feed_dict(self, sess, content_image, style_images, weights):
+    def _get_feed_dict(self, sess, content_image, style_images, weights):
+        "Only to be used when stylizing a single image, ie when using 'stylize()' "
         feed_dict = dict()
         #Feeding content features
         content_features = self.get_content_features(sess, content_image)
@@ -132,11 +140,148 @@ class CoarseFineModel(object):
 
         return feed_dict
 
+    def _neural_matching(self, sess, tiles, style_images):
+        layer = self.config['neural_matching_layer']
+        if self.config['verbose']: print('Computing neural matches')
+        style_tiles = []
+        for image in style_images:
+            style_tiles += image
+
+        tile_features = []
+        for tile in tiles:
+            sess.run(self.net['input'].assign(tile))
+            features = np.ndarray.flatten(sess.run(self.net[layer]))
+            features = features/np.linalg.norm(features)
+            tile_features.append(features)
+        tile_features = np.stack(tile_features)
+
+        style_features = []
+        for style in style_tiles:
+            sess.run(self.net['input'].assign(style))
+            features = np.ndarray.flatten(sess.run(self.net[layer]))
+            features = features/np.linalg.norm(features)
+            style_features.append(features)
+        style_features = np.stack(style_features)
+
+        similarity_matrix = np.matmul(tile_features, style_features.T)
+        if self.config['verbose']:print('Computed {}x{} similarity matrix'.format(*similarity_matrix.shape))
+
+        mapping = np.argmin(similarity_matrix, axis=1)
+        matches = []
+        for index in mapping:
+            matches.append(style_tiles[index])
+
+        return matches
+
+
+    def stylize_multiple(self, sess, tiles, style_images, init_tiles, update_fn=None):
+        style_weights = self.config['style_image_weights']
+
+        with tf.device('/device:cpu:0'):
+            logger = self.init_logger(sess)
+
+        # initializing optimizer
+        if self.config['verbose']: print("Initializing optimizer")
+        optimizer = tf.contrib.opt.ScipyOptimizerInterface(
+                self.total_loss, method='L-BFGS-B',
+                options={'maxiter': self.config['max_iterations_per_tile'],
+                          'disp': 50})
+
+        for num_pass in range(self.config['max_image_passes']):
+            for i, tile in enumerate(tiles):
+
+                #Logging important stuff
+                with tf.device('/device:cpu:0'):
+                    logger.log_images("Content_image", [postprocess(tile)])
+                    # TODO: log all style tiles
+                    logger.log_images("Style_images", list(map(postprocess, style_images[0])))
+                    logger.log_images("Init_image", [postprocess(init_tiles[i])])
+
+
+                if self.config['verbose']: print('COMPUTING FEED FOR TILE {}'.format(i))
+                feed_dict = dict()
+                # Getting the content features of the image tile , and appending them
+                # to the feed dict
+                content_features = self.get_content_features(sess, tile)
+                for layer, placeholder in self.content_features.items():
+                    feed_dict[placeholder] = content_features[layer]
+
+                # Getting the style features of the style tiles, and appending them
+                # to the feed dict
+                for style_tiles, weight in zip(style_images, style_weights):
+                    for style_tile in style_tiles:
+                        grams = self.get_style_gram(sess, style_tile)
+                        for layer, placeholder in self.style_gram.items():
+                            if placeholder not in feed_dict.keys():
+                                feed_dict[placeholder] = weight*grams[layer]
+                            else:
+                                feed_dict[placeholder] += weight*grams[layer]
+
+                # The gram matrices of the init tiles that are NOT being
+                # optimized are subtracted from the overall style gram matrix
+                if not self.config['optimize_tile_with_global_gram']:
+                    o_tiles = init_tiles[:i] + init_tiles[i+1:]
+                    for o_tile in o_tiles:
+                        grams = self.get_style_gram(sess, o_tile)
+                        for layer, placeholder in self.style_gram.items():
+                            feed_dict[placeholder] -= grams[layer]
+
+                output = self.run_optimizer(sess, optimizer, logger, feed_dict, init_tiles[i])
+
+                # Update the initialization tiles
+                if update_fn is None:
+                    init_tiles[i] = output
+                else:
+                    init_tiles = update_fn(output, i, init_tiles)
+
+        return init_tiles
+
+    def stylize_patches(self, sess, tiles, style_images, init_tiles, update_fn):
+
+        #get a style tile for every content tile
+        matches = self._neural_matching(sess, tiles, style_images)
+
+        with tf.device('/device:cpu:0'):
+            logger = self.init_logger(sess)
+
+        # initializing optimizer
+        if self.config['verbose']: print("Initializing optimizer")
+        optimizer = tf.contrib.opt.ScipyOptimizerInterface(
+                self.total_loss, method='L-BFGS-B',
+                options={'maxiter': self.config['max_iterations_per_tile'],
+                          'disp': 50})
+
+        for num_pass in range(self.config['max_image_passes']):
+            for i, tile in enumerate(tiles):
+                feed_dict = self._get_feed_dict(sess, tile, [matches[i]], [1])
+
+                #Logging important stuff
+                with tf.device('/device:cpu:0'):
+                    logger.log_images("Content_image", [postprocess(tile)])
+                    # TODO: log all style tiles
+                    logger.log_images("Style_images", [postprocess(matches[i])])
+                    logger.log_images("Init_image", [postprocess(init_tiles[i])])
+
+                output = self.run_optimizer(sess, optimizer, logger, feed_dict, init_tiles[i])
+
+                #update initialization tiles
+                if update_fn is None:
+                    init_tiles[i] = output
+                else:
+                    init_tiles = update_fn(output, i, init_tiles)
+
+        return init_tiles
+
     def stylize(self, sess, content_image, style_images, init_img):
-        feed_dict = self.get_feed_dict(sess, content_image, style_images, \
+        feed_dict = self._get_feed_dict(sess, content_image, style_images, \
                                             self.config['style_image_weights'])
 
-        logger = self.init_logger(sess)
+        #Logging important stuff
+        with tf.device('/device:cpu:0'):
+            logger = self.init_logger(sess)
+            logger.log_images("Content_image", [postprocess(content_image)])
+            logger.log_images("Style_images", list(map(postprocess, style_images)))
+            logger.log_images("Init_image", [postprocess(init_img)])
 
         # initializing optimizer
         if self.config['verbose']: print("Initializing optimizer")
@@ -149,49 +294,44 @@ class CoarseFineModel(object):
 
         return output
 
-    def run_optimizer(self, sess, optimizer, logger, feed_dict, init_img, num_iters=50):
+    def run_optimizer(self, sess, optimizer, logger, feed_dict, init_img, log_iter=50):
+        if self.config['verbose']: print("Running optimizer")
 
-        # This is a callback function that increments global step and writes summary
-        # its a workaround because scipy optimizers don't update the graph
-        # at every step, so instead 'step_summary' is passed as a callback to the
-        # 'optimizer', and custom summary statistics are recorded
-        # https://stackoverflow.com/questions/44685228/how-to-get-loss-function-history-using-tf-contrib-opt-scipyoptimizerinterface
-        def _step_summary(tloss, sloss, closs, image):
-            #increment global step
+        # This is a callback function that writes summary
+        def _step_summary(tloss, sloss, closs, tvloss):
+            with tf.device('/device:cpu:0'):
+                #increment global step
+                if logger.global_step%5 == 0:
+                    logger.log_scalar("Total_loss", tloss)
+                    logger.log_scalar("Style_loss", sloss)
+                    logger.log_scalar("Content_loss", closs)
+                    logger.log_scalar("Total_variation", tvloss)
+
+        # A callback function that increments global step
+        def _step_callback(image):
             logger.increment_global_step()
-            step_value = logger.global_step
-            if step_value%5 == 0:
-                logger.log_scalar("Total_loss", tloss, step_value)
-                logger.log_scalar("Style_loss", sloss, step_value)
-                logger.log_scalar("Content_loss", closs, step_value)
-            if step_value%50 == 0:
-                # TODO: postprocess image before writing
-                logger.log_images("Stylized_image", [image[0]], step_value)
+            if logger.global_step%log_iter == 0:
+                image = np.reshape(image, self.net['input'].get_shape().as_list())
+                logger.log_images("Stylized_image", [postprocess(image)])
 
         sess.run(self.net['input'].assign(init_img))
         optimizer.minimize(sess, feed_dict, fetches=[self.total_loss, \
                             self.style_loss, self.content_loss,\
-                            self.net['input']], loss_callback= _step_summary)
+                            self.tv_loss], \
+                            step_callback= _step_callback, \
+                            loss_callback= _step_summary)
         return sess.run(self.net['input'])
 
-    def init_logger(self, sess, custom=True):
-        if custom:
-            return CustomLogger(self.config['log_dir'], sess.graph)
+    def init_logger(self, sess):
+        if self.logger is None:
+            self.logger = CustomLogger(self.config['log_dir'], sess.graph)
 
-    def run(self, h, w, d, content, styles, init):
-        with tf.Session() as sess:
-            self.build_network(sess, h, w, d)
-            output = self.stylize(sess, content, styles, init)
-        return output
+        return self.logger
 
 if __name__=='__main__':
     from utils import get_config, get_content_image, get_style_images, get_init_image
     import matplotlib.pyplot as plt
     config = get_config()
-    content_img = get_content_image(config['content_image'], (40,40))
-    style_imgs = get_style_images(config['style_images'], (40,40))
-    init_img = get_init_image(config['init_image_type'], content_img, \
-                        style_imgs, init_img_path = config['init_image_path'])
     a = CoarseFineModel(config)
     output = a.run(40,40,3, content_img, style_imgs, init_img)
     plt.imsave('output.jpg', output[0])

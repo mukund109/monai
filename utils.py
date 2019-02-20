@@ -1,5 +1,8 @@
 import cv2
 import numpy as np
+import json
+from collections import OrderedDict
+import os
 
 def get_config():
     json_str = ''
@@ -12,14 +15,15 @@ def get_config():
 
 def check_image(img, path):
     if img is None:
-        raise OSError(errno.ENOENT, "No such file", path)
+        raise FileNotFoundError("No such file {}".format(path))
 
 def maybe_make_directory(dir_path):
     if not os.path.exists(dir_path):
         os.makedirs(dir_path)
 
-def get_noise_image(noise_ratio, content_img):
-    noise_img = np.random.uniform(0., 255., content_img.shape)
+def get_noise_image(noise_ratio, content_img, seed):
+    np.random.seed(seed)
+    noise_img = np.random.uniform(90., 160., content_img.shape)
     img = noise_ratio * noise_img + (1.-noise_ratio) * content_img
     return img.astype('uint8')
 
@@ -45,6 +49,35 @@ def tiles_to_image(tiles):
     for i in range(num_):
         for j in range(num_):
             image[i*tile_size : (i+1)*tile_size, j*tile_size : (j+1)*tile_size] = tiles[i*num_+j]
+
+    return image
+
+def image_to_overlapping_tiles(image, zoom, overlap):
+    base_size = (image.shape[0] + overlap*(zoom-1))//zoom - overlap
+    tiles = []
+    for i in range(zoom):
+        for j in range(zoom):
+            tile = image[i*base_size:(i+1)*base_size+overlap,j*base_size:(j+1)*base_size+overlap]
+            tiles.append(tile)
+    return tiles
+
+def overlapping_tiles_to_image(tiles, overlap, bring_to_front_index=None):
+    zoom = len(tiles)
+    assert (zoom**(1/2)-int(zoom**(1/2)))==0
+    zoom = int(len(tiles)**(1/2))
+
+    new_size = (tiles[0].shape[0]*zoom - overlap*(zoom-1))
+    base_size = (new_size + overlap*(zoom-1))//zoom - overlap
+
+    image =  np.ndarray(shape=(new_size, new_size, 3), dtype='uint8')
+    for i in range(zoom):
+        for j in range(zoom):
+            image[i*base_size:(i+1)*base_size+overlap,j*base_size:(j+1)*base_size+overlap] = tiles[i*zoom + j]
+
+    if bring_to_front_index is not None:
+        k = bring_to_front_index
+        i,j = k//zoom, k%zoom
+        image[i*base_size:(i+1)*base_size+overlap,j*base_size:(j+1)*base_size+overlap] = tiles[k]
 
     return image
 
@@ -131,13 +164,51 @@ class ImageHandler(object):
             init_image = self.init_image
         init_image = cv2.resize(init_image, new_size, interpolation=cv2.INTER_LANCZOS4)
         init_crops = image_to_tiles(init_image, zoom)
-        init_corps = list(map(preprocess, init_crops))
+        init_crops = list(map(preprocess, init_crops))
 
         return content_crops, style_crops, init_crops
 
     def stich_images(self, images):
         images = list(map(postprocess, images))
         return tiles_to_image(images)
+
+    def stich_overlapping_images(self, images, overlap, bring_to_front_index=None):
+        images = list(map(postprocess, images))
+        return overlapping_tiles_to_image(images, overlap, bring_to_front_index)
+
+    def get_overlapping_data(self, zoom=2, overlap=100 , init_image=None):
+        new_size = (self.base_size[0]*zoom - overlap*(zoom-1))
+        new_size = (new_size, new_size)
+
+        content = cv2.resize(self.content_image, new_size, interpolation=cv2.INTER_LANCZOS4)
+        content_crops = image_to_overlapping_tiles(content, zoom, overlap)
+        content_crops = list(map(preprocess, content_crops))
+
+        style_crops = []
+        for simg in self.style_images:
+            simg = cv2.resize(simg, new_size, interpolation=cv2.INTER_LANCZOS4)
+            simg_crops = image_to_overlapping_tiles(simg, zoom, overlap)
+            simg_crops = list(map(preprocess, simg_crops))
+            style_crops.append(simg_crops)
+
+        if init_image is None:
+            init_image = self.init_image
+        init_image = cv2.resize(init_image, new_size, interpolation=cv2.INTER_LANCZOS4)
+        init_crops = image_to_overlapping_tiles(init_image, zoom, overlap)
+        init_crops = list(map(preprocess, init_crops))
+
+        return content_crops, style_crops, init_crops
+
+    def get_update_function(self, overlap):
+        def update_overlapping_image(tile, index, all_tiles):
+            all_tiles[index] = tile
+            image = self.stich_overlapping_images(all_tiles, overlap, index)
+
+            zoom = int(len(all_tiles)**(1/2))
+            all_tiles = image_to_overlapping_tiles(image, zoom, overlap)
+            all_tiles = list(map(preprocess, all_tiles))
+            return all_tiles
+        return update_overlapping_image
 
     def save_checkpoint(checkpoint_img, iteration):
         maybe_make_directory('checkpoints')
@@ -173,7 +244,7 @@ class ImageHandler(object):
         elif init_type == 'style':
             return style_imgs[0]
         elif init_type == 'random':
-            init_img = get_noise_image(self.config['noise_ratio'], content_img)
+            init_img = get_noise_image(self.config['noise_ratio'], content_img, self.config['random_seed'])
             return init_img
         elif init_type == 'custom':
             init_img = read_image(init_img_path)
@@ -181,34 +252,59 @@ class ImageHandler(object):
         else:
             raise FileNotFoundError()
 
-    def write_image_output(output_img, content_img, style_imgs, init_img):
-        out_dir = config["image_output_dir"]
+    def write_overlapping_image_output(self, output, content_tiles, style_tiles, init_tiles, overlap):
+
+        output, content, init = [self.stich_overlapping_images(tiles, overlap) for tiles in  [output, content_tiles, init_tiles]]
+        style_imgs = [self.stich_overlapping_images(tiles, overlap) for tiles in style_tiles]
+        out_dir = self.config["image_output_dir"]
         maybe_make_directory(out_dir)
         img_path = os.path.join(out_dir,  "output.png")
         content_path = os.path.join(out_dir, 'content.png')
         init_path = os.path.join(out_dir, 'init.png')
 
-        write_image(img_path, output_img)
-        write_image(content_path, content_img)
-        write_image(init_path, init_img)
+        write_image(img_path, output)
+        write_image(content_path, content)
+        write_image(init_path, init)
         index = 0
         for style_img in style_imgs:
             path = os.path.join(out_dir, 'style_'+str(index)+'.png')
             write_image(path, style_img)
             index += 1
 
+    def write_image_output(self, output_img, content_img, style_imgs, init_img):
+        out_dir = self.config["image_output_dir"]
+        maybe_make_directory(out_dir)
+        img_path = os.path.join(out_dir,  "output.png")
+        content_path = os.path.join(out_dir, 'content.png')
+        init_path = os.path.join(out_dir, 'init.png')
+
+        write_image(img_path, postprocess(output_img))
+        write_image(content_path, postprocess(content_img))
+        write_image(init_path, postprocess(init_img))
+        index = 0
+        for style_img in style_imgs:
+            path = os.path.join(out_dir, 'style_'+str(index)+'.png')
+            write_image(path, postprocess(style_img))
+            index += 1
+
         # save the configuration settings
         out_file = os.path.join(out_dir, 'meta_data.json')
         with open(out_file, 'w') as f:
-            json.dump(config, f)
+            json.dump(self.config, f)
 
 if __name__=='__main__':
     from utils import get_config
     import matplotlib.pyplot as plt
     config = get_config()
-    handler = ImageHandler(config, base_size=(200,200))
-    a = handler.get_fine_data(zoom=4)
-    for i,img in enumerate(a[1][0]):
+    handler = ImageHandler(config, base_size=(500,500))
+    a = handler.get_overlapping_data(zoom=3, overlap=200)
+    import pdb; pdb.set_trace()
+    for i,img in enumerate(a[0]):
         write_image('output{}.png'.format(i), postprocess(img))
-    b = handler.stich_images(a[1][0])
-    write_image('combine.png', b)
+
+    update = handler.get_update_function(overlap=200)
+
+    tile = a[0][2]
+    tile = tile*0
+    b = update(tile, 2, a[0])
+    write_image('1.png', postprocess(b[1]))

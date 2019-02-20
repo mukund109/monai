@@ -18,22 +18,20 @@ class CustomLogger(object):
 
     def increment_global_step(self):
         self.global_step += 1
-        
-    def log_scalar(self, tag, value, step):
+
+    def log_scalar(self, tag, value):
         """Log a scalar variable.
         Parameter
         ----------
         tag : basestring
             Name of the scalar
         value
-        step : int
-            training iteration
         """
         summary = tf.Summary(value=[tf.Summary.Value(tag=tag,
                                                      simple_value=value)])
-        self.writer.add_summary(summary, step)
+        self.writer.add_summary(summary, self.global_step)
 
-    def log_images(self, tag, images, step):
+    def log_images(self, tag, images):
         """Logs a list of images."""
 
         im_summaries = []
@@ -52,10 +50,10 @@ class CustomLogger(object):
 
         # Create and write Summary
         summary = tf.Summary(value=im_summaries)
-        self.writer.add_summary(summary, step)
+        self.writer.add_summary(summary, self.global_step)
 
 
-    def log_histogram(self, tag, values, step, bins=1000):
+    def log_histogram(self, tag, values, bins=1000):
         """Logs the histogram of a list/vector of values."""
         # Convert to a numpy array
         values = np.array(values)
@@ -84,5 +82,5 @@ class CustomLogger(object):
 
         # Create and write Summary
         summary = tf.Summary(value=[tf.Summary.Value(tag=tag, histo=hist)])
-        self.writer.add_summary(summary, step)
+        self.writer.add_summary(summary, self.global_step)
         self.writer.flush()

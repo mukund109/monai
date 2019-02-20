@@ -8,7 +8,9 @@ import scipy.io
 def build_vgg(sess, h, w, d, config):
 
     def conv_layer(layer_name, layer_input, W):
-        conv = tf.nn.conv2d(layer_input, W, strides=[1, 1, 1, 1], padding='SAME')
+        padding = tf.constant([[0,0],[1,1],[1,1],[0,0]], name='padding')
+        layer_input = tf.pad(layer_input, padding, mode='SYMMETRIC', name='padding_op')
+        conv = tf.nn.conv2d(layer_input, W, strides=[1, 1, 1, 1], padding='VALID')
         if config['verbose']: print('--{} | shape={} | weights_shape={}'.format(layer_name,
             conv.get_shape(), W.get_shape()))
         return conv
