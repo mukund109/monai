@@ -22,6 +22,7 @@ class CoarseFineModel(object):
         self.config = config
         self._build_network(sess, height, width, 3)
         self.logger = None
+        self.input_shape = (height, width)
 
     def _build_style_loss(self):
         """
@@ -96,15 +97,21 @@ class CoarseFineModel(object):
             tv_weight = self.config['tv_weight']
             self.total_loss = style_wt*self.style_loss + content_wt*self.content_loss + tv_weight*self.tv_loss
 
-    def get_content_features(self, sess, image):
+    def get_content_features(self, sess, image, layers=None):
         """
         Computes the features maps of the image, corresponding to the layers
-        mentioned in config['content_layers'], returns a dict of numpy arrays
+        in the 'layers' argument, otherwise uses the layers in
+        config['content_layers'], returns a dict of numpy arrays
         """
         assert image.shape == self.net['input'].shape
         sess.run(self.net['input'].assign(image))
         feature_maps = dict()
-        for layer in self.config['content_layers']:
+
+        content_layers = layers
+        if layers is None:
+            content_layers = self.config['content_layers']
+
+        for layer in content_layers:
             feature_maps[layer] = sess.run(self.net[layer])
         return feature_maps
 
@@ -173,7 +180,6 @@ class CoarseFineModel(object):
 
         return matches
 
-
     def stylize_multiple(self, sess, tiles, style_images, init_tiles, update_fn=None):
         style_weights = self.config['style_image_weights']
 
@@ -236,7 +242,7 @@ class CoarseFineModel(object):
 
         return init_tiles
 
-    def stylize_patches(self, sess, tiles, style_images, init_tiles, update_fn):
+    def stylize_patches(self, sess, tiles, style_images, init_tiles, update_fn=None):
 
         #get a style tile for every content tile
         matches = self._neural_matching(sess, tiles, style_images)

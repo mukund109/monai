@@ -150,6 +150,6 @@ def _scale_array(arr, clip=True):
     return scaled
 
 if __name__=='__main__':
-    source = cv2.imread('images/close_up_1.png')
-    target = cv2.imread('images/helplessness4.png')
-    cv2.imwrite('images/sorrow3.png', color_transfer(source, target, preserve_paper=False))
+    source = cv2.imread('images/aurat.jpeg')
+    target = cv2.imread('images/old_man_portrait_GAP.jpg')
+    cv2.imwrite('images/old_man_portrait_GAP_ct.jpg', color_transfer(source, target, preserve_paper=False))
