@@ -1,7 +1,7 @@
 {
   "debug":true,
   "verbose":true,
-  "model_weights":"vgg19_weights/imagenet-vgg-verydeep-19.mat",
+  "model_weights":"vgg19_weights",
   "device":"/gpu:0",
   "log_dir":"summary",
 
@@ -12,23 +12,23 @@
   "max_image_passes":1, //for multiresolution, total_global_steps = passes * iterations_per_tile * num_tiles
   "optimize_tile_with_global_gram":false,
 
-  "style_images":["images/head_of_pros_GAP_ct.jpg", "images/old_man_portrait_GAP_ct.jpg"],
-  "style_image_weights":[0.5,0.5],
+  "style_images":["images/portrait5.jpg"],
+  "style_image_weights":[1],
   "style_weight": 5e3, //default=1e4
-  "style_layers":["conv1_1", "conv2_1", "conv3_1", "conv4_1", "conv5_1"], //["conv1_1", "conv1_2", "conv2_1", "conv2_2", "conv3_1","conv3_2","conv3_3","conv3_4","conv4_1","conv4_2","conv4_3","conv4_4","conv5_1","conv5_2","conv5_3","conv5_4"],
-  "style_layer_weights":[0.2,0.2,0.2,0.2,0.2],//[0.0625,0.0625,0.0625,0.0625,0.0625,0.0625,0.0625,0.0625,0.0625,0.0625,0.0625,0.0625,0.0625,0.0625,0.0625,0.0625],
+  "style_layers":["relu1_1", "relu2_1", "relu3_1", "relu4_1", "relu5_1"], //["conv1_1", "conv1_2", "conv2_1", "conv2_2", "conv3_1","conv3_2","conv3_3","conv3_4","conv4_1","conv4_2","conv4_3","conv4_4","conv5_1","conv5_2","conv5_3","conv5_4"],
+  "style_layer_weights":[0.2,0.2,0.6,0,0],//[0.0625,0.0625,0.0625,0.0625,0.0625,0.0625,0.0625,0.0625,0.0625,0.0625,0.0625,0.0625,0.0625,0.0625,0.0625,0.0625],
 
   "tv_weight":1e2, //default=1e-3
 
-  "content_image": "images/aurat.jpeg",
+  "content_image": "images/stock.jpeg",
   "content_weight":2e4, //default=5e0
   //content preprocessing
   "content_loss_constant":2, //choice[1,2,3]
   "content_layers":["conv4_2"],
-  "pooling_type":"max", //['avg','max']
+  "pooling_type":"avg", //['avg','max']
   "content_layer_weights":[1],
 
-  "neural_matching_layer":"pool3",
+  "neural_matching_layer":"pool1",
 
   "image_output_dir":"results",
   "original_colors":true,

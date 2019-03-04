@@ -20,8 +20,8 @@ def save_feature_histogram(sess, model, image_path, layer):
 
 if __name__=='__main__':
     config = get_config()
-
     device = '/device:CPU:0' if config['debug'] else "/device:GPU:0"
     with tf.Session() as sess, tf.device(device):
         model = CoarseFineModel(sess, config, 50, 50)
-        save_feature_histogram(sess, model, 'images/aurat.jpeg', 'conv3_1')
+        save_feature_histogram(sess, model, 'sample_images/aurat.jpeg', 'relu5_1')
+    
