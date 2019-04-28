@@ -6,8 +6,6 @@ Slow style transfer using summary statistics, as originally described by Gatys e
 2. [Combining MRF and CNNs](https://arxiv.org/pdf/1601.04589.pdf)
 3. [Improving NST](https://pdfs.semanticscholar.org/9d19/affb1521192b5a075f33ff517dd06a5c17dc.pdf)
 
-It also contains the implementation of some original techniques that allow arbitrarily high resolution style transfer while keeping the memory usage of the GPU under control. This is done using a patch based mechanism to stylize parts of the image seperately. This is because most low level features of an ultra high resolution artwork (like the edges of brush strokes, or the texture of the canvas) don't have long range dependencies, so it makes little sense to stylize the whole image at once.
-
 Notes/Todo :
 1. VGG weights have not been normalized to give a mean activation of 1.
 2. Correlation chain
