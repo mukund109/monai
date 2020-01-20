@@ -7,7 +7,7 @@ Slow style transfer using summary statistics, as originally described by Gatys e
 3. [Improving NST](https://pdfs.semanticscholar.org/9d19/affb1521192b5a075f33ff517dd06a5c17dc.pdf)
 
 Notes/Todo :
-~~1. VGG weights have not been normalized to give a mean activation of 1.~~
+~~1. VGG weights have not been normalized to give a mean activation of 1~~
 
 2. Correlation chain
 
