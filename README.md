@@ -1,6 +1,6 @@
 # Slow style transfer
 
-Slow style transfer using summary statistics, as originally described by Gatys et al is still the most flexible and robust method for *multi-resolution* style transfer. However, its difficult to obtain ultra high resolution images due to memory limitations, especially when using the LBFGS optimizer. This repo is contains code for my attempts at solving this problem by by trading high memory usage for more computation time. A lot of ideas have been borrowed from the following papers:
+Slow style transfer using summary statistics, as originally described by Gatys et al is still the most flexible and robust method for *multi-resolution* style transfer. However, its difficult to construct ultra high resolution styled images due to memory limitations, especially when using the LBFGS optimizer. This repo is contains code for my attempts at solving this problem by by trading high memory usage for more computation time. A lot of ideas have been borrowed from the following papers:
 
 1. [Controlling perceptual factors in NST](http://openaccess.thecvf.com/content_cvpr_2017/papers/Gatys_Controlling_Perceptual_Factors_CVPR_2017_paper.pdf)
 2. [Combining MRF and CNNs](https://arxiv.org/pdf/1601.04589.pdf)
@@ -8,6 +8,7 @@ Slow style transfer using summary statistics, as originally described by Gatys e
 
 Notes/Todo :
 ~~1. VGG weights have not been normalized to give a mean activation of 1.~~
+
 2. Correlation chain
 
 Some results:
