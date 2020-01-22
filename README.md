@@ -1,3 +1,5 @@
+Note: This repo is experimental, use it for experimenting only
+
 # Slow style transfer
 
 Slow style transfer using summary statistics, as originally described by Gatys et al is still the most flexible and robust method for *multi-resolution* style transfer. However, its difficult to construct ultra high resolution styled images due to memory limitations, especially when using the LBFGS optimizer. This repo is contains code for my attempts at solving this problem by by trading high memory usage for more computation time. A lot of ideas have been borrowed from the following papers:
